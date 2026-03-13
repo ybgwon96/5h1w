@@ -7,7 +7,7 @@ Claude Code 스킬 — 5W1H 프레임워크(Who, What, When, Where, Why, How)로
 Claude Code에서 아래 2줄을 순서대로 입력하세요:
 
 ```bash
-/plugin marketplace add ybgwon96/5h1w
+/plugin marketplace add https://github.com/ybgwon96/5h1w.git
 /plugin install 5h1w@ybgwon96-5h1w
 ```
 
