@@ -1,12 +1,15 @@
 {
+  "name": "5h1w",
+  "description": "5W1H Context Gatherer plugin marketplace",
+  "owner": {
+    "name": "ybgwon96",
+    "url": "https://github.com/ybgwon96"
+  },
   "plugins": [
     {
       "name": "5h1w",
       "description": "5W1H Context Gatherer — Gather missing context using the 5W1H framework with interactive selection UI",
-      "source": {
-        "type": "local",
-        "path": "."
-      },
+      "source": "./",
       "category": "workflow",
       "tags": ["5w1h", "context", "vibe-coding", "beginner-friendly"]
     }
