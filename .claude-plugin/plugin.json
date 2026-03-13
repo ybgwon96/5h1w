@@ -1,0 +1,8 @@
+{
+  "name": "5h1w",
+  "description": "5W1H Context Gatherer — Analyze user requests through the 5W1H framework (Who, What, When, Where, Why, How) and gather missing context via interactive selection UI before implementation",
+  "version": "1.0.0",
+  "author": {
+    "name": "ybgwon96"
+  }
+}
