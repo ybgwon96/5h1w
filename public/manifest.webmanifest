@@ -1,0 +1,26 @@
+{
+  "name": "Neon Dash",
+  "short_name": "Neon Dash",
+  "description": "한 손가락으로 즐기는 중력반전 엔드리스 아케이드",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "portrait",
+  "background_color": "#05060f",
+  "theme_color": "#05060f",
+  "icons": [
+    {
+      "src": "./icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}
