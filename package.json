@@ -1,7 +1,7 @@
 {
-  "name": "neon-dash",
+  "name": "block-blast",
   "version": "1.0.0",
-  "description": "Neon Dash — a one-thumb gravity-flip endless arcade game (mobile PWA).",
+  "description": "Block Blast — a neon 8x8 block-puzzle game with combos & streaks (mobile PWA).",
   "type": "module",
   "license": "MIT",
   "scripts": {

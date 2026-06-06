@@ -1,6 +1,6 @@
-// Minimal offline-first service worker for Neon Dash.
+// Minimal offline-first service worker for Block Blast.
 // Bumps with each release so clients pick up new builds.
-const CACHE = "neon-dash-v1";
+const CACHE = "block-blast-v1";
 const CORE = ["./", "./index.html", "./manifest.webmanifest", "./icons/icon.svg"];
 
 self.addEventListener("install", (event) => {

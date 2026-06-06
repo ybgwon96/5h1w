@@ -23,18 +23,30 @@ window.addEventListener("resize", resize);
 window.addEventListener("orientationchange", resize);
 resize();
 
-// ---- Input: tap / click / keyboard -------------------------------------
-function onTap(e: Event): void {
-  e.preventDefault();
-  game.tap();
-}
-canvas.addEventListener("pointerdown", onTap);
-window.addEventListener("keydown", (e) => {
-  if (e.code === "Space" || e.code === "ArrowUp" || e.code === "Enter") {
+// ---- Input: pointer drag (drag a block from the tray onto the grid) -----
+canvas.addEventListener(
+  "pointerdown",
+  (e) => {
     e.preventDefault();
-    game.tap();
-  }
-});
+    canvas.setPointerCapture(e.pointerId);
+    game.pointerDown(e.clientX, e.clientY);
+  },
+  { passive: false }
+);
+canvas.addEventListener(
+  "pointermove",
+  (e) => {
+    e.preventDefault();
+    game.pointerMove(e.clientX, e.clientY);
+  },
+  { passive: false }
+);
+const endDrag = (e: PointerEvent): void => {
+  e.preventDefault();
+  game.pointerUp();
+};
+canvas.addEventListener("pointerup", endDrag, { passive: false });
+canvas.addEventListener("pointercancel", endDrag, { passive: false });
 // Pause the loop's clock when tabbed away so dt never explodes.
 let hidden = false;
 document.addEventListener("visibilitychange", () => {
@@ -56,6 +68,12 @@ function frame(now: number): void {
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+
+// Expose the game instance for automated tests — dev builds only, stripped
+// from production bundles by the bundler's dead-code elimination.
+if (import.meta.env.DEV) {
+  (window as unknown as { game: Game }).game = game;
+}
 
 // ---- PWA service worker -------------------------------------------------
 if ("serviceWorker" in navigator) {

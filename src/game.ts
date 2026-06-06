@@ -2,446 +2,665 @@ import { audio } from "./audio";
 import { Particles } from "./particles";
 import { getBest, setBest } from "./storage";
 
-type State = "menu" | "playing" | "dead";
+type State = "playing" | "dead";
+type Coord = [number, number];
 
-interface Player {
-  x: number;
-  y: number;
-  vy: number;
-  size: number;
-  trailTimer: number;
-  gravityDir: 1 | -1; // +1 pulls to the floor, -1 to the ceiling
-}
+const GRID = 8;
 
-interface Obstacle {
-  x: number;
+// Neon block palette: [light, dark] gradient stops. Index 0 in the board
+// means "empty"; stored cells hold paletteIndex + 1.
+const PALETTE: [string, string][] = [
+  ["#00f0ff", "#0090ff"],
+  ["#ff2bd6", "#a01aff"],
+  ["#7cf73a", "#16a766"],
+  ["#ffd23f", "#ff8a00"],
+  ["#ff5d6c", "#d61a3c"],
+  ["#5b8cff", "#653e9b"],
+  ["#36f1cd", "#0bb39a"],
+  ["#ff9f1c", "#ff5400"],
+];
+
+// Base polyomino shapes (cell offsets). Rotations are generated at runtime.
+const BASE_SHAPES: Coord[][] = [
+  [[0, 0]],
+  [
+    [0, 0],
+    [1, 0],
+  ],
+  [
+    [0, 0],
+    [1, 0],
+    [2, 0],
+  ],
+  [
+    [0, 0],
+    [1, 0],
+    [2, 0],
+    [3, 0],
+  ],
+  [
+    [0, 0],
+    [1, 0],
+    [2, 0],
+    [3, 0],
+    [4, 0],
+  ],
+  [
+    [0, 0],
+    [1, 0],
+    [0, 1],
+    [1, 1],
+  ],
+  [
+    [0, 0],
+    [1, 0],
+    [2, 0],
+    [0, 1],
+    [1, 1],
+    [2, 1],
+    [0, 2],
+    [1, 2],
+    [2, 2],
+  ],
+  [
+    [0, 0],
+    [0, 1],
+    [1, 1],
+  ],
+  [
+    [0, 0],
+    [1, 0],
+    [2, 0],
+    [0, 1],
+  ],
+  [
+    [0, 0],
+    [1, 0],
+    [2, 0],
+    [2, 1],
+  ],
+  [
+    [0, 0],
+    [1, 0],
+    [2, 0],
+    [1, 1],
+  ],
+  [
+    [0, 0],
+    [1, 0],
+    [1, 1],
+    [2, 1],
+  ],
+  [
+    [1, 0],
+    [2, 0],
+    [0, 1],
+    [1, 1],
+  ],
+  [
+    [0, 0],
+    [0, 1],
+    [0, 2],
+    [1, 2],
+  ],
+  [
+    [1, 0],
+    [0, 1],
+    [1, 1],
+    [2, 1],
+    [1, 2],
+  ],
+  [
+    [0, 0],
+    [1, 0],
+    [2, 0],
+    [2, 1],
+    [2, 2],
+  ],
+];
+
+interface Piece {
+  cells: Coord[];
+  color: number; // palette index
   w: number;
   h: number;
-  side: "floor" | "ceil";
-  scored: boolean;
 }
 
-interface Orb {
+interface Drag {
+  slot: number;
+  piece: Piece;
+  px: number; // current pointer pos
+  py: number;
+}
+
+interface Popup {
   x: number;
   y: number;
-  r: number;
-  collected: boolean;
-  pulse: number;
+  text: string;
+  color: string;
+  life: number;
+  max: number;
+  vy: number;
+  size: number;
 }
 
-const COLORS = {
-  cyan: "#00f0ff",
-  pink: "#ff2bd6",
-  bg: "#05060f",
-  white: "#ffffff",
-  warn: "#ff5d6c",
-};
+function normalize(cells: Coord[]): Coord[] {
+  const minX = Math.min(...cells.map((c) => c[0]));
+  const minY = Math.min(...cells.map((c) => c[1]));
+  return cells.map(([x, y]) => [x - minX, y - minY] as Coord);
+}
+
+function rotate(cells: Coord[]): Coord[] {
+  return normalize(cells.map(([x, y]) => [-y, x] as Coord));
+}
+
+function key(cells: Coord[]): string {
+  return [...cells].sort((a, b) => a[0] - b[0] || a[1] - b[1]).join("|");
+}
+
+function rotations(base: Coord[]): Coord[][] {
+  const out: Coord[][] = [];
+  const seen = new Set<string>();
+  let cur = normalize(base);
+  for (let i = 0; i < 4; i++) {
+    const k = key(cur);
+    if (!seen.has(k)) {
+      seen.add(k);
+      out.push(cur);
+    }
+    cur = rotate(cur);
+  }
+  return out;
+}
+
+const SHAPE_ROTATIONS = BASE_SHAPES.map(rotations);
+
+function randomPiece(): Piece {
+  const rots = SHAPE_ROTATIONS[(Math.random() * SHAPE_ROTATIONS.length) | 0];
+  const cells = rots[(Math.random() * rots.length) | 0];
+  const w = Math.max(...cells.map((c) => c[0])) + 1;
+  const h = Math.max(...cells.map((c) => c[1])) + 1;
+  return { cells, color: (Math.random() * PALETTE.length) | 0, w, h };
+}
 
 export class Game {
   private ctx: CanvasRenderingContext2D;
   private w = 0;
   private h = 0;
 
-  private state: State = "menu";
-  private best = getBest();
+  private state: State = "playing";
+  private board: number[] = new Array(GRID * GRID).fill(0);
+  private tray: (Piece | null)[] = [];
+  private drag: Drag | null = null;
+
   private score = 0;
-  private combo = 0;
-  private bestCombo = 0;
+  private best = getBest();
+  private streak = 0;
+  private shownScore = 0; // animated counter
 
-  private player: Player;
-  private obstacles: Obstacle[] = [];
-  private orbs: Orb[] = [];
   private particles = new Particles();
-
-  private speed = 0;
-  private distance = 0;
-  private spawnX = 0;
-  private elapsed = 0;
+  private popups: Popup[] = [];
+  private clearing: { x: number; y: number; color: number; life: number }[] = [];
   private shake = 0;
   private flash = 0;
-  private gridOffset = 0;
-  private deathTimer = 0;
   private pulse = 0;
+  private deadTimer = 0;
+  private newRecord = false;
+  private placeAnim = 0;
 
-  // Layout (recomputed on resize).
-  private top = 0;
-  private bottom = 0;
-  private playerX = 0;
-  private unit = 0;
+  // layout
+  private cs = 0; // board cell size
+  private bx = 0;
+  private by = 0;
+  private boardSize = 0;
+  private trayTop = 0;
+  private trayH = 0;
+  private trayCS = 0;
 
   constructor(ctx: CanvasRenderingContext2D) {
     this.ctx = ctx;
-    this.player = { x: 0, y: 0, vy: 0, size: 0, trailTimer: 0, gravityDir: 1 };
+    this.refill();
   }
 
   resize(w: number, h: number): void {
     this.w = w;
     this.h = h;
-    this.unit = Math.max(10, Math.min(w, h * 0.6) / 26);
-    this.top = h * 0.12;
-    this.bottom = h * 0.92;
-    this.playerX = w * 0.26;
-    this.player.size = this.unit * 1.4;
-    this.player.x = this.playerX;
-    if (this.state !== "playing") {
-      this.player.y = this.bottom - this.player.size / 2;
-    }
+    const hudH = h * 0.15;
+    this.boardSize = Math.min(w * 0.94, h * 0.6);
+    this.cs = this.boardSize / GRID;
+    this.bx = (w - this.boardSize) / 2;
+    this.by = hudH;
+    this.trayTop = this.by + this.boardSize + h * 0.025;
+    this.trayH = Math.max(h * 0.16, h - this.trayTop - h * 0.02);
+    this.trayCS = Math.min(this.cs * 0.5, (w / 3) / 5.5, this.trayH / 4.5);
   }
 
-  /** A tap/click/space. Starts, flips gravity, or restarts. */
-  tap(): void {
+  // ---- input -------------------------------------------------------------
+
+  pointerDown(x: number, y: number): void {
     audio.resume();
-    if (this.state === "menu") {
-      this.start();
-      return;
-    }
     if (this.state === "dead") {
-      // Small guard so the death tap doesn't instantly restart.
-      if (this.deathTimer > 0.5) this.start();
+      if (this.deadTimer > 0.45) this.restart();
       return;
     }
-    // Flip gravity and give a snappy nudge toward the new surface.
-    this.player.gravityDir = this.player.gravityDir === 1 ? -1 : 1;
-    this.player.vy = this.flipImpulse() * this.player.gravityDir;
-    audio.flip();
-    vibrate(12);
-    this.particles.burst(this.player.x, this.player.y, 8, COLORS.cyan, {
-      speed: 140,
-      size: 3,
-      life: 0.35,
+    // Hit-test the three tray slots.
+    for (let i = 0; i < this.tray.length; i++) {
+      const piece = this.tray[i];
+      if (!piece) continue;
+      const c = this.traySlotCenter(i);
+      const pw = piece.w * this.trayCS;
+      const ph = piece.h * this.trayCS;
+      const left = c.x - pw / 2;
+      const top = c.y - ph / 2;
+      const pad = this.trayCS * 0.8;
+      if (x >= left - pad && x <= left + pw + pad && y >= top - pad && y <= top + ph + pad) {
+        this.drag = { slot: i, piece, px: x, py: y };
+        audio.pick();
+        return;
+      }
+    }
+  }
+
+  pointerMove(x: number, y: number): void {
+    if (this.drag) {
+      this.drag.px = x;
+      this.drag.py = y;
+    }
+  }
+
+  pointerUp(): void {
+    if (!this.drag) return;
+    const target = this.snappedCell(this.drag);
+    if (target && this.fits(this.drag.piece, target.gx, target.gy)) {
+      this.place(this.drag.slot, this.drag.piece, target.gx, target.gy);
+    } else {
+      audio.invalid();
+    }
+    this.drag = null;
+  }
+
+  // Where the top-left of the dragged piece snaps on the grid. The piece
+  // floats above the finger so it stays visible on touch screens.
+  private snappedCell(d: Drag): { gx: number; gy: number } | null {
+    const pw = d.piece.w * this.cs;
+    const ph = d.piece.h * this.cs;
+    const lift = this.cs * 1.2;
+    const topLeftX = d.px - pw / 2;
+    const topLeftY = d.py - ph - lift;
+    const gx = Math.round((topLeftX - this.bx) / this.cs);
+    const gy = Math.round((topLeftY - this.by) / this.cs);
+    return { gx, gy };
+  }
+
+  // ---- game logic --------------------------------------------------------
+
+  private refill(): void {
+    this.tray = [randomPiece(), randomPiece(), randomPiece()];
+  }
+
+  private fits(piece: Piece, gx: number, gy: number): boolean {
+    for (const [ox, oy] of piece.cells) {
+      const x = gx + ox;
+      const y = gy + oy;
+      if (x < 0 || x >= GRID || y < 0 || y >= GRID) return false;
+      if (this.board[y * GRID + x] !== 0) return false;
+    }
+    return true;
+  }
+
+  private canPlaceAnywhere(piece: Piece): boolean {
+    for (let gy = 0; gy < GRID; gy++) {
+      for (let gx = 0; gx < GRID; gx++) {
+        if (this.fits(piece, gx, gy)) return true;
+      }
+    }
+    return false;
+  }
+
+  private anyMoveLeft(): boolean {
+    return this.tray.some((p) => p && this.canPlaceAnywhere(p));
+  }
+
+  private place(slot: number, piece: Piece, gx: number, gy: number): void {
+    for (const [ox, oy] of piece.cells) {
+      this.board[(gy + oy) * GRID + (gx + ox)] = piece.color + 1;
+    }
+    this.score += piece.cells.length;
+    this.tray[slot] = null;
+    this.placeAnim = 1;
+    audio.place();
+    vibrate(8);
+
+    this.resolveClears();
+
+    if (this.tray.every((p) => !p)) this.refill();
+
+    if (!this.anyMoveLeft()) this.die();
+  }
+
+  private resolveClears(): void {
+    const fullRows: number[] = [];
+    const fullCols: number[] = [];
+    for (let y = 0; y < GRID; y++) {
+      let full = true;
+      for (let x = 0; x < GRID; x++) if (this.board[y * GRID + x] === 0) full = false;
+      if (full) fullRows.push(y);
+    }
+    for (let x = 0; x < GRID; x++) {
+      let full = true;
+      for (let y = 0; y < GRID; y++) if (this.board[y * GRID + x] === 0) full = false;
+      if (full) fullCols.push(x);
+    }
+    const lines = fullRows.length + fullCols.length;
+    if (lines === 0) {
+      this.streak = 0;
+      return;
+    }
+
+    const cleared = new Set<number>();
+    for (const y of fullRows) for (let x = 0; x < GRID; x++) cleared.add(y * GRID + x);
+    for (const x of fullCols) for (let y = 0; y < GRID; y++) cleared.add(y * GRID + x);
+
+    // Animate + clear.
+    for (const idx of cleared) {
+      const x = idx % GRID;
+      const y = (idx / GRID) | 0;
+      const color = this.board[idx] - 1;
+      const cx = this.bx + x * this.cs + this.cs / 2;
+      const cy = this.by + y * this.cs + this.cs / 2;
+      this.clearing.push({ x: cx, y: cy, color, life: 0.35 });
+      this.particles.burst(cx, cy, 10, PALETTE[color]?.[0] ?? "#fff", {
+        speed: 240,
+        size: this.cs * 0.12,
+        life: 0.6,
+      });
+      this.board[idx] = 0;
+    }
+
+    this.streak++;
+    const base = cleared.size * 10;
+    const comboMult = lines; // more lines at once = bigger multiplier
+    const streakBonus = (this.streak - 1) * 15;
+    const gained = base * comboMult + streakBonus;
+    this.score += gained;
+
+    // Feedback.
+    const center = { x: this.bx + this.boardSize / 2, y: this.by + this.boardSize / 2 };
+    this.popups.push({
+      x: center.x,
+      y: center.y,
+      text: `+${gained}`,
+      color: "#ffffff",
+      life: 0.9,
+      max: 0.9,
+      vy: -this.cs * 1.2,
+      size: this.cs * 0.9,
     });
-  }
-
-  private flipImpulse(): number {
-    return this.h * 0.62;
-  }
-
-  private start(): void {
-    this.state = "playing";
-    this.score = 0;
-    this.combo = 0;
-    this.distance = 0;
-    this.elapsed = 0;
-    this.speed = this.w * 0.42;
-    this.obstacles = [];
-    this.orbs = [];
-    this.particles.clear();
-    this.spawnX = this.w + 100;
-    this.shake = 0;
-    this.flash = 0.4;
-    this.player.y = this.bottom - this.player.size / 2;
-    this.player.vy = 0;
-    this.player.gravityDir = 1;
-    this.player.trailTimer = 0;
-    audio.start();
-    vibrate(20);
+    const label =
+      lines >= 4
+        ? "INCREDIBLE!"
+        : lines === 3
+          ? "TRIPLE!"
+          : lines === 2
+            ? "DOUBLE!"
+            : this.streak >= 2
+              ? `STREAK x${this.streak}`
+              : "";
+    if (label) {
+      this.popups.push({
+        x: center.x,
+        y: center.y - this.cs * 1.1,
+        text: label,
+        color: "#ff2bd6",
+        life: 1.1,
+        max: 1.1,
+        vy: -this.cs * 0.8,
+        size: this.cs * 0.75,
+      });
+    }
+    this.shake = Math.min(18, 6 + lines * 4);
+    this.flash = Math.min(0.5, 0.15 + lines * 0.1);
+    audio.clear(lines + this.streak);
+    vibrate(lines >= 2 ? [20, 20, 30] : 16);
   }
 
   private die(): void {
     this.state = "dead";
-    this.deathTimer = 0;
-    this.shake = 22;
-    this.flash = 0.7;
-    this.particles.burst(this.player.x, this.player.y, 46, COLORS.pink, {
-      speed: 420,
-      size: 5,
-      life: 0.9,
-      gravity: 600,
-    });
-    this.particles.burst(this.player.x, this.player.y, 24, COLORS.cyan, {
-      speed: 300,
-      size: 4,
-      life: 0.7,
-    });
-    audio.death();
-    vibrate([40, 30, 60]);
-    if (this.score > this.best) {
+    this.deadTimer = 0;
+    this.shake = 16;
+    this.flash = 0.5;
+    audio.over();
+    vibrate([40, 40, 80]);
+    if (Math.floor(this.score) > this.best) {
       this.best = Math.floor(this.score);
       setBest(this.best);
+      this.newRecord = true;
     }
-    this.bestCombo = Math.max(this.bestCombo, this.combo);
   }
+
+  private restart(): void {
+    this.board.fill(0);
+    this.score = 0;
+    this.shownScore = 0;
+    this.streak = 0;
+    this.newRecord = false;
+    this.state = "playing";
+    this.popups = [];
+    this.clearing = [];
+    this.particles.clear();
+    this.refill();
+    audio.start();
+  }
+
+  // ---- update / render ---------------------------------------------------
 
   update(dt: number): void {
     this.pulse += dt;
     this.particles.update(dt);
-    if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * 60);
-    if (this.flash > 0) this.flash = Math.max(0, this.flash - dt * 1.6);
+    if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * 50);
+    if (this.flash > 0) this.flash = Math.max(0, this.flash - dt * 1.4);
+    if (this.placeAnim > 0) this.placeAnim = Math.max(0, this.placeAnim - dt * 4);
+    if (this.state === "dead") this.deadTimer += dt;
 
-    if (this.state === "playing") {
-      this.elapsed += dt;
-      // Ramp difficulty: speed creeps up over time.
-      this.speed += dt * this.w * 0.012;
-      const dx = this.speed * dt;
-      this.distance += dx;
-      this.gridOffset = (this.gridOffset + dx) % (this.unit * 4);
-      this.score = this.distance / (this.w * 0.06);
+    // Animate the score counter toward the real value.
+    const target = Math.floor(this.score);
+    if (this.shownScore < target) {
+      this.shownScore = Math.min(target, this.shownScore + Math.ceil((target - this.shownScore) * 0.2) + 1);
+    }
 
-      this.updatePlayer(dt);
-      this.updateField(dx);
-      this.checkCollisions();
-    } else {
-      // Idle bob on menus.
-      this.gridOffset = (this.gridOffset + dt * this.w * 0.05) % (this.unit * 4);
-      if (this.state === "dead") this.deathTimer += dt;
+    for (let i = this.popups.length - 1; i >= 0; i--) {
+      const p = this.popups[i];
+      p.life -= dt;
+      p.y += p.vy * dt;
+      if (p.life <= 0) this.popups.splice(i, 1);
+    }
+    for (let i = this.clearing.length - 1; i >= 0; i--) {
+      this.clearing[i].life -= dt;
+      if (this.clearing[i].life <= 0) this.clearing.splice(i, 1);
     }
   }
-
-  private updatePlayer(dt: number): void {
-    // Gravity always pulls toward the player's current gravity direction,
-    // which only changes on tap. Landing zeroes velocity but the constant
-    // pull keeps the player pinned to that surface until the next flip.
-    this.player.vy += this.h * 2.4 * this.player.gravityDir * dt;
-    this.player.y += this.player.vy * dt;
-
-    const floorY = this.bottom - this.player.size / 2;
-    const ceilY = this.top + this.player.size / 2;
-    if (this.player.y >= floorY) {
-      this.player.y = floorY;
-      if (this.player.vy > this.h * 0.4) this.landFx(floorY + this.player.size / 2);
-      this.player.vy = 0;
-    } else if (this.player.y <= ceilY) {
-      this.player.y = ceilY;
-      if (this.player.vy < -this.h * 0.4) this.landFx(ceilY - this.player.size / 2);
-      this.player.vy = 0;
-    }
-
-    // Trail.
-    this.player.trailTimer -= dt;
-    if (this.player.trailTimer <= 0) {
-      this.player.trailTimer = 0.02;
-      this.particles.emit({
-        x: this.player.x - this.player.size * 0.3,
-        y: this.player.y,
-        vx: -this.speed * 0.2,
-        vy: (Math.random() - 0.5) * 30,
-        life: 0.4,
-        size: this.player.size * 0.32,
-        color: this.combo >= 5 ? COLORS.pink : COLORS.cyan,
-        gravity: 0,
-      });
-    }
-  }
-
-  private landFx(y: number): void {
-    this.particles.burst(this.player.x, y, 6, COLORS.cyan, { speed: 90, size: 2.5, life: 0.3 });
-  }
-
-  private updateField(dx: number): void {
-    for (const o of this.obstacles) o.x -= dx;
-    for (const orb of this.orbs) {
-      orb.x -= dx;
-      orb.pulse += dx * 0.01;
-    }
-    this.obstacles = this.obstacles.filter((o) => o.x + o.w > -50);
-    this.orbs = this.orbs.filter((o) => o.x > -50 && !o.collected);
-
-    // Spawn ahead as the world scrolls.
-    this.spawnX -= dx;
-    while (this.spawnX < this.w + 80) {
-      this.spawnPattern();
-    }
-  }
-
-  private spawnPattern(): void {
-    const gap = this.bottom - this.top;
-    // Difficulty: gaps between obstacles shrink as speed rises.
-    const minGap = Math.max(this.w * 0.34, this.player.size * 5);
-    const stride = Math.max(minGap, this.w * 0.6 - this.elapsed * 2);
-
-    const side: "floor" | "ceil" = Math.random() < 0.5 ? "floor" : "ceil";
-    const h = gap * (0.46 + Math.random() * 0.16);
-    const w = this.unit * (1.4 + Math.random() * 1.2);
-    this.obstacles.push({ x: this.spawnX, w, h, side, scored: false });
-
-    // Reward orb in the safe channel (opposite the obstacle).
-    if (Math.random() < 0.7) {
-      const orbY =
-        side === "floor"
-          ? this.top + gap * (0.18 + Math.random() * 0.12)
-          : this.bottom - gap * (0.18 + Math.random() * 0.12);
-      this.orbs.push({
-        x: this.spawnX + w * 0.5,
-        y: orbY,
-        r: this.unit * 0.55,
-        collected: false,
-        pulse: Math.random() * Math.PI * 2,
-      });
-    }
-    this.spawnX += stride;
-  }
-
-  private checkCollisions(): void {
-    const p = this.player;
-    const half = p.size / 2;
-    const pl = p.x - half;
-    const pr = p.x + half;
-    const pt = p.y - half;
-    const pb = p.y + half;
-
-    for (const o of this.obstacles) {
-      const oy = o.side === "floor" ? this.bottom - o.h : this.top;
-      const ob = o.side === "floor" ? this.bottom : this.top + o.h;
-      if (pr > o.x && pl < o.x + o.w && pb > oy && pt < ob) {
-        this.die();
-        return;
-      }
-      if (!o.scored && o.x + o.w < pl) {
-        o.scored = true;
-        this.score += 5;
-      }
-    }
-
-    for (const orb of this.orbs) {
-      if (orb.collected) continue;
-      const dx = orb.x - p.x;
-      const dy = orb.y - p.y;
-      if (dx * dx + dy * dy < (orb.r + half) * (orb.r + half)) {
-        orb.collected = true;
-        this.combo++;
-        this.bestCombo = Math.max(this.bestCombo, this.combo);
-        this.score += 10 + this.combo * 2;
-        audio.collect(this.combo);
-        vibrate(8);
-        this.particles.burst(orb.x, orb.y, 14, COLORS.pink, {
-          speed: 200,
-          size: 3,
-          life: 0.5,
-        });
-        this.flash = Math.min(0.3, this.flash + 0.12);
-      }
-    }
-  }
-
-  // ---- Rendering ---------------------------------------------------------
 
   render(): void {
     const ctx = this.ctx;
+    this.drawBackground();
+
     ctx.save();
     if (this.shake > 0) {
       ctx.translate((Math.random() - 0.5) * this.shake, (Math.random() - 0.5) * this.shake);
     }
-
-    this.drawBackground();
-    this.drawBounds();
-
-    for (const o of this.obstacles) this.drawObstacle(o);
-    for (const orb of this.orbs) this.drawOrb(orb);
-
+    this.drawBoard();
+    this.drawClearing();
     this.particles.draw(ctx);
-
-    if (this.state !== "dead") this.drawPlayer();
-
     ctx.restore();
 
+    this.drawTray();
+    this.drawDrag();
+    this.drawPopups();
     this.drawHud();
-    if (this.state === "menu") this.drawMenu();
-    if (this.state === "dead") this.drawGameOver();
 
     if (this.flash > 0) {
       ctx.save();
-      ctx.fillStyle = `rgba(255,255,255,${this.flash * 0.5})`;
+      ctx.fillStyle = `rgba(255,255,255,${this.flash * 0.4})`;
       ctx.fillRect(0, 0, this.w, this.h);
       ctx.restore();
     }
+    if (this.state === "dead") this.drawGameOver();
   }
 
   private drawBackground(): void {
     const ctx = this.ctx;
-    const grad = ctx.createLinearGradient(0, 0, 0, this.h);
-    grad.addColorStop(0, "#0a0b1e");
-    grad.addColorStop(1, COLORS.bg);
-    ctx.fillStyle = grad;
+    const g = ctx.createLinearGradient(0, 0, 0, this.h);
+    g.addColorStop(0, "#0a0b1e");
+    g.addColorStop(1, "#05060f");
+    ctx.fillStyle = g;
     ctx.fillRect(0, 0, this.w, this.h);
+  }
 
-    // Parallax neon grid.
+  private drawBoard(): void {
+    const ctx = this.ctx;
+    // Board backing panel.
     ctx.save();
-    ctx.strokeStyle = "rgba(0,240,255,0.08)";
-    ctx.lineWidth = 1;
-    const step = this.unit * 4;
-    for (let x = -this.gridOffset; x < this.w; x += step) {
-      ctx.beginPath();
-      ctx.moveTo(x, this.top);
-      ctx.lineTo(x, this.bottom);
-      ctx.stroke();
+    ctx.fillStyle = "rgba(255,255,255,0.03)";
+    roundRect(ctx, this.bx - 6, this.by - 6, this.boardSize + 12, this.boardSize + 12, 16);
+    ctx.fill();
+    ctx.restore();
+
+    for (let y = 0; y < GRID; y++) {
+      for (let x = 0; x < GRID; x++) {
+        const px = this.bx + x * this.cs;
+        const py = this.by + y * this.cs;
+        const v = this.board[y * GRID + x];
+        if (v === 0) {
+          ctx.save();
+          ctx.fillStyle = (x + y) % 2 === 0 ? "rgba(255,255,255,0.045)" : "rgba(255,255,255,0.03)";
+          roundRect(ctx, px + 1.5, py + 1.5, this.cs - 3, this.cs - 3, this.cs * 0.18);
+          ctx.fill();
+          ctx.restore();
+        } else {
+          this.drawBlock(px, py, this.cs, v - 1, 1);
+        }
+      }
     }
-    for (let y = this.top; y <= this.bottom; y += step) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(this.w, y);
-      ctx.stroke();
+
+    // Drag ghost preview on the grid.
+    if (this.drag) {
+      const t = this.snappedCell(this.drag);
+      if (t && this.fits(this.drag.piece, t.gx, t.gy)) {
+        // Highlight rows/cols that would complete.
+        this.highlightCompletions(this.drag.piece, t.gx, t.gy);
+        for (const [ox, oy] of this.drag.piece.cells) {
+          const px = this.bx + (t.gx + ox) * this.cs;
+          const py = this.by + (t.gy + oy) * this.cs;
+          this.drawBlock(px, py, this.cs, this.drag.piece.color, 0.45);
+        }
+      }
+    }
+  }
+
+  private highlightCompletions(piece: Piece, gx: number, gy: number): void {
+    const temp = new Set<number>();
+    for (const [ox, oy] of piece.cells) temp.add((gy + oy) * GRID + (gx + ox));
+    const filled = (x: number, y: number) =>
+      this.board[y * GRID + x] !== 0 || temp.has(y * GRID + x);
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.fillStyle = "rgba(0,240,255,0.12)";
+    for (let y = 0; y < GRID; y++) {
+      let full = true;
+      for (let x = 0; x < GRID; x++) if (!filled(x, y)) full = false;
+      if (full) ctx.fillRect(this.bx, this.by + y * this.cs, this.boardSize, this.cs);
+    }
+    for (let x = 0; x < GRID; x++) {
+      let full = true;
+      for (let y = 0; y < GRID; y++) if (!filled(x, y)) full = false;
+      if (full) ctx.fillRect(this.bx + x * this.cs, this.by, this.cs, this.boardSize);
     }
     ctx.restore();
   }
 
-  private drawBounds(): void {
+  private drawClearing(): void {
     const ctx = this.ctx;
-    ctx.save();
-    ctx.strokeStyle = COLORS.cyan;
-    ctx.shadowBlur = 18;
-    ctx.shadowColor = COLORS.cyan;
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(0, this.top);
-    ctx.lineTo(this.w, this.top);
-    ctx.moveTo(0, this.bottom);
-    ctx.lineTo(this.w, this.bottom);
-    ctx.stroke();
-    ctx.restore();
+    for (const c of this.clearing) {
+      const a = c.life / 0.35;
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.globalCompositeOperation = "lighter";
+      const s = this.cs * (1 + (1 - a) * 0.6);
+      this.drawBlock(c.x - s / 2, c.y - s / 2, s, c.color, a);
+      ctx.restore();
+    }
   }
 
-  private drawObstacle(o: Obstacle): void {
+  private drawBlock(px: number, py: number, size: number, color: number, alpha: number): void {
     const ctx = this.ctx;
-    const y = o.side === "floor" ? this.bottom - o.h : this.top;
+    const [light, dark] = PALETTE[color] ?? ["#fff", "#aaa"];
     ctx.save();
-    ctx.shadowBlur = 20;
-    ctx.shadowColor = COLORS.pink;
-    const g = ctx.createLinearGradient(o.x, y, o.x, y + o.h);
-    g.addColorStop(0, "#ff2bd6");
-    g.addColorStop(1, "#7a1aff");
+    ctx.globalAlpha = alpha;
+    ctx.shadowBlur = size * 0.35;
+    ctx.shadowColor = light;
+    const g = ctx.createLinearGradient(px, py, px + size, py + size);
+    g.addColorStop(0, light);
+    g.addColorStop(1, dark);
     ctx.fillStyle = g;
-    roundRect(ctx, o.x, y, o.w, o.h, Math.min(8, o.w / 3));
+    roundRect(ctx, px + 1.5, py + 1.5, size - 3, size - 3, size * 0.2);
     ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,0.25)";
-    roundRect(ctx, o.x + 2, y + (o.side === "floor" ? 2 : o.h - 8), o.w - 4, 6, 3);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  private drawOrb(orb: Orb): void {
-    const ctx = this.ctx;
-    const r = orb.r * (1 + Math.sin(orb.pulse + this.pulse * 4) * 0.12);
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    ctx.shadowBlur = 24;
-    ctx.shadowColor = COLORS.cyan;
-    ctx.fillStyle = COLORS.cyan;
-    ctx.beginPath();
-    ctx.arc(orb.x, orb.y, r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = COLORS.white;
-    ctx.beginPath();
-    ctx.arc(orb.x, orb.y, r * 0.45, 0, Math.PI * 2);
+    // glossy top highlight
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = alpha * 0.5;
+    ctx.fillStyle = "rgba(255,255,255,0.55)";
+    roundRect(ctx, px + size * 0.16, py + size * 0.14, size * 0.68, size * 0.2, size * 0.1);
     ctx.fill();
     ctx.restore();
   }
 
-  private drawPlayer(): void {
+  private traySlotCenter(i: number): { x: number; y: number } {
+    const slotW = this.w / 3;
+    return { x: slotW * i + slotW / 2, y: this.trayTop + this.trayH / 2 };
+  }
+
+  private drawTray(): void {
+    for (let i = 0; i < this.tray.length; i++) {
+      const piece = this.tray[i];
+      if (!piece || (this.drag && this.drag.slot === i)) continue;
+      const c = this.traySlotCenter(i);
+      const pw = piece.w * this.trayCS;
+      const ph = piece.h * this.trayCS;
+      const left = c.x - pw / 2;
+      const top = c.y - ph / 2;
+      const bob = Math.sin(this.pulse * 2 + i) * this.trayCS * 0.06;
+      for (const [ox, oy] of piece.cells) {
+        this.drawBlock(left + ox * this.trayCS, top + oy * this.trayCS + bob, this.trayCS, piece.color, 1);
+      }
+    }
+  }
+
+  private drawDrag(): void {
+    if (!this.drag) return;
+    const d = this.drag;
+    const pw = d.piece.w * this.cs;
+    const ph = d.piece.h * this.cs;
+    const lift = this.cs * 1.2;
+    const left = d.px - pw / 2;
+    const top = d.py - ph - lift;
+    for (const [ox, oy] of d.piece.cells) {
+      this.drawBlock(left + ox * this.cs, top + oy * this.cs, this.cs, d.piece.color, 0.92);
+    }
+  }
+
+  private drawPopups(): void {
     const ctx = this.ctx;
-    const p = this.player;
-    const s = p.size;
     ctx.save();
-    ctx.shadowBlur = 26;
-    ctx.shadowColor = this.combo >= 5 ? COLORS.pink : COLORS.cyan;
-    const g = ctx.createLinearGradient(p.x - s / 2, p.y - s / 2, p.x + s / 2, p.y + s / 2);
-    g.addColorStop(0, "#aef9ff");
-    g.addColorStop(1, this.combo >= 5 ? COLORS.pink : COLORS.cyan);
-    ctx.fillStyle = g;
-    roundRect(ctx, p.x - s / 2, p.y - s / 2, s, s, s * 0.28);
-    ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,0.85)";
-    roundRect(ctx, p.x - s * 0.28, p.y - s * 0.28, s * 0.3, s * 0.3, s * 0.1);
-    ctx.fill();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    for (const p of this.popups) {
+      const a = Math.min(1, p.life / (p.max * 0.5));
+      ctx.globalAlpha = a;
+      ctx.fillStyle = p.color;
+      ctx.shadowBlur = 16;
+      ctx.shadowColor = p.color;
+      ctx.font = `900 ${Math.round(p.size)}px ui-sans-serif, system-ui, sans-serif`;
+      ctx.fillText(p.text, p.x, p.y);
+    }
     ctx.restore();
   }
 
@@ -450,92 +669,59 @@ export class Game {
     ctx.save();
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
-    ctx.fillStyle = COLORS.white;
-    ctx.shadowBlur = 12;
-    ctx.shadowColor = COLORS.cyan;
-    const big = Math.round(this.unit * 2.2);
-    ctx.font = `700 ${big}px ui-sans-serif, system-ui, sans-serif`;
-    ctx.fillText(String(Math.floor(this.score)), this.w / 2, this.h * 0.03);
-
-    ctx.font = `600 ${Math.round(this.unit * 0.9)}px ui-sans-serif, system-ui, sans-serif`;
-    ctx.fillStyle = "rgba(255,255,255,0.6)";
-    ctx.shadowBlur = 0;
-    ctx.fillText(`BEST ${this.best}`, this.w / 2, this.h * 0.03 + big + 4);
-
-    if (this.state === "playing" && this.combo >= 2) {
-      ctx.fillStyle = COLORS.pink;
-      ctx.shadowBlur = 10;
-      ctx.shadowColor = COLORS.pink;
-      ctx.font = `800 ${Math.round(this.unit * 1.3)}px ui-sans-serif, system-ui, sans-serif`;
-      ctx.fillText(`x${this.combo} COMBO`, this.w / 2, this.h * 0.03 + big + this.unit * 1.6);
-    }
-    ctx.restore();
-  }
-
-  private drawMenu(): void {
-    const ctx = this.ctx;
-    ctx.save();
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-
-    const title = "NEON DASH";
-    const ts = Math.round(this.unit * 3.4);
-    ctx.font = `900 ${ts}px ui-sans-serif, system-ui, sans-serif`;
-    ctx.shadowBlur = 30;
-    ctx.shadowColor = COLORS.cyan;
-    ctx.fillStyle = COLORS.cyan;
-    ctx.fillText(title, this.w / 2, this.h * 0.4);
-    ctx.fillStyle = COLORS.pink;
-    ctx.shadowColor = COLORS.pink;
-    ctx.globalAlpha = 0.35;
-    ctx.fillText(title, this.w / 2 + 3, this.h * 0.4 + 3);
-    ctx.globalAlpha = 1;
-
-    const blink = 0.5 + Math.sin(this.pulse * 3) * 0.5;
-    ctx.globalAlpha = 0.5 + blink * 0.5;
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = COLORS.white;
-    ctx.font = `600 ${Math.round(this.unit * 1.3)}px ui-sans-serif, system-ui, sans-serif`;
-    ctx.fillText("탭하여 시작", this.w / 2, this.h * 0.55);
-    ctx.globalAlpha = 1;
-
     ctx.fillStyle = "rgba(255,255,255,0.5)";
-    ctx.font = `500 ${Math.round(this.unit)}px ui-sans-serif, system-ui, sans-serif`;
-    ctx.fillText("탭 = 중력 반전 · 오브를 모아 콤보", this.w / 2, this.h * 0.62);
+    ctx.font = `700 ${Math.round(this.h * 0.018)}px ui-sans-serif, system-ui, sans-serif`;
+    ctx.fillText(`최고  ${this.best}`, this.w / 2, this.h * 0.028);
+
+    const pop = this.placeAnim > 0 ? 1 + this.placeAnim * 0.06 : 1;
+    ctx.fillStyle = "#fff";
+    ctx.shadowBlur = 18;
+    ctx.shadowColor = "#00f0ff";
+    const fs = Math.round(this.h * 0.06 * pop);
+    ctx.font = `900 ${fs}px ui-sans-serif, system-ui, sans-serif`;
+    ctx.fillText(String(this.shownScore), this.w / 2, this.h * 0.055);
+
+    if (this.streak >= 2 && this.state === "playing") {
+      ctx.shadowColor = "#ff2bd6";
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = "#ff2bd6";
+      ctx.font = `800 ${Math.round(this.h * 0.022)}px ui-sans-serif, system-ui, sans-serif`;
+      ctx.fillText(`🔥 STREAK x${this.streak}`, this.w / 2, this.h * 0.12);
+    }
     ctx.restore();
   }
 
   private drawGameOver(): void {
     const ctx = this.ctx;
     ctx.save();
-    ctx.fillStyle = "rgba(5,6,15,0.55)";
+    ctx.fillStyle = "rgba(5,6,15,0.72)";
     ctx.fillRect(0, 0, this.w, this.h);
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 
-    ctx.font = `900 ${Math.round(this.unit * 2.6)}px ui-sans-serif, system-ui, sans-serif`;
+    const u = this.h * 0.04;
+    ctx.fillStyle = "#ff5d6c";
     ctx.shadowBlur = 24;
-    ctx.shadowColor = COLORS.warn;
-    ctx.fillStyle = COLORS.warn;
-    ctx.fillText("GAME OVER", this.w / 2, this.h * 0.34);
+    ctx.shadowColor = "#ff5d6c";
+    ctx.font = `900 ${Math.round(u * 1.5)}px ui-sans-serif, system-ui, sans-serif`;
+    ctx.fillText("GAME OVER", this.w / 2, this.h * 0.36);
 
-    ctx.shadowBlur = 12;
-    ctx.shadowColor = COLORS.cyan;
-    ctx.fillStyle = COLORS.white;
-    ctx.font = `800 ${Math.round(this.unit * 2)}px ui-sans-serif, system-ui, sans-serif`;
-    ctx.fillText(`${Math.floor(this.score)}`, this.w / 2, this.h * 0.46);
+    ctx.shadowColor = "#00f0ff";
+    ctx.shadowBlur = 16;
+    ctx.fillStyle = "#fff";
+    ctx.font = `900 ${Math.round(u * 2)}px ui-sans-serif, system-ui, sans-serif`;
+    ctx.fillText(String(Math.floor(this.score)), this.w / 2, this.h * 0.46);
 
     ctx.shadowBlur = 0;
-    ctx.font = `600 ${Math.round(this.unit)}px ui-sans-serif, system-ui, sans-serif`;
-    const isNew = Math.floor(this.score) >= this.best && this.best > 0;
-    ctx.fillStyle = isNew ? COLORS.pink : "rgba(255,255,255,0.6)";
-    ctx.fillText(isNew ? "★ 신기록!" : `BEST ${this.best}`, this.w / 2, this.h * 0.52);
+    ctx.font = `700 ${Math.round(u)}px ui-sans-serif, system-ui, sans-serif`;
+    ctx.fillStyle = this.newRecord ? "#ff2bd6" : "rgba(255,255,255,0.6)";
+    ctx.fillText(this.newRecord ? "★ 신기록!" : `최고  ${this.best}`, this.w / 2, this.h * 0.53);
 
-    if (this.deathTimer > 0.5) {
+    if (this.deadTimer > 0.45) {
       const blink = 0.5 + Math.sin(this.pulse * 3) * 0.5;
       ctx.globalAlpha = 0.5 + blink * 0.5;
-      ctx.fillStyle = COLORS.white;
-      ctx.font = `600 ${Math.round(this.unit * 1.2)}px ui-sans-serif, system-ui, sans-serif`;
+      ctx.fillStyle = "#fff";
+      ctx.font = `700 ${Math.round(u * 1.1)}px ui-sans-serif, system-ui, sans-serif`;
       ctx.fillText("탭하여 다시 시작", this.w / 2, this.h * 0.62);
     }
     ctx.restore();

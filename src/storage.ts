@@ -1,7 +1,7 @@
 // Tiny wrapper around localStorage so the rest of the game never has to
 // worry about private-mode exceptions or missing keys.
-const BEST_KEY = "neon-dash:best";
-const MUTE_KEY = "neon-dash:muted";
+const BEST_KEY = "block-blast:best";
+const MUTE_KEY = "block-blast:muted";
 
 export function getBest(): number {
   try {

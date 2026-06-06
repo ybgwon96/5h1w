@@ -1,15 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
-    <linearGradient id="glow" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#00f0ff" />
-      <stop offset="1" stop-color="#ff2bd6" />
+    <linearGradient id="cyan" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#00f0ff" /><stop offset="1" stop-color="#0090ff" />
+    </linearGradient>
+    <linearGradient id="pink" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff2bd6" /><stop offset="1" stop-color="#a01aff" />
+    </linearGradient>
+    <linearGradient id="lime" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7cf73a" /><stop offset="1" stop-color="#16a766" />
+    </linearGradient>
+    <linearGradient id="amber" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffd23f" /><stop offset="1" stop-color="#ff8a00" />
     </linearGradient>
   </defs>
   <!-- Full-bleed background so the safe-zone mask never clips content. -->
   <rect width="512" height="512" fill="#05060f" />
-  <g transform="translate(0,0)">
-    <path d="M170 332 L236 218 L268 270 L342 180" fill="none" stroke="url(#glow)"
-      stroke-width="24" stroke-linecap="round" stroke-linejoin="round" />
-    <circle cx="342" cy="180" r="22" fill="#fff" />
+  <g transform="translate(154,154) scale(0.4)">
+    <rect x="0" y="0" width="120" height="120" rx="26" fill="url(#cyan)" />
+    <rect x="156" y="0" width="120" height="120" rx="26" fill="url(#pink)" />
+    <rect x="0" y="156" width="120" height="120" rx="26" fill="url(#amber)" />
+    <rect x="156" y="156" width="120" height="120" rx="26" fill="url(#lime)" />
   </g>
 </svg>

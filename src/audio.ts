@@ -58,22 +58,31 @@ class AudioEngine {
     osc.stop(now + duration + 0.02);
   }
 
-  flip(): void {
-    this.tone(420, 0.12, "triangle", 0.22, 680);
+  pick(): void {
+    this.tone(440, 0.06, "triangle", 0.14, 560);
   }
 
-  collect(combo: number): void {
-    // Rising pitch with combo for a satisfying streak.
-    const base = 660 + Math.min(combo, 12) * 40;
-    this.tone(base, 0.1, "square", 0.18, base * 1.5);
+  place(): void {
+    this.tone(330, 0.08, "triangle", 0.2, 440);
   }
 
-  death(): void {
-    this.tone(220, 0.5, "sawtooth", 0.3, 60);
+  invalid(): void {
+    this.tone(180, 0.12, "sawtooth", 0.16, 120);
+  }
+
+  clear(intensity: number): void {
+    // Rising arpeggio that climbs with combo + streak intensity.
+    const base = 520 + Math.min(intensity, 14) * 55;
+    this.tone(base, 0.1, "square", 0.2, base * 1.4);
+    this.tone(base * 1.5, 0.12, "triangle", 0.14, base * 2);
+  }
+
+  over(): void {
+    this.tone(260, 0.5, "sawtooth", 0.28, 70);
   }
 
   start(): void {
-    this.tone(523, 0.12, "triangle", 0.25, 784);
+    this.tone(523, 0.12, "triangle", 0.22, 784);
   }
 }
 

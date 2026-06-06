@@ -1,7 +1,7 @@
 {
-  "name": "Neon Dash",
-  "short_name": "Neon Dash",
-  "description": "한 손가락으로 즐기는 중력반전 엔드리스 아케이드",
+  "name": "Block Blast",
+  "short_name": "Block Blast",
+  "description": "네온 블록을 드래그해 줄을 없애는 8x8 블록 퍼즐 — 콤보와 연속 보너스",
   "lang": "ko",
   "start_url": "./",
   "scope": "./",
