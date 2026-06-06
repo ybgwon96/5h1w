@@ -1,5 +1,11 @@
 :root {
   color-scheme: dark;
+  --bg: #05060f;
+  --panel: rgba(255, 255, 255, 0.08);
+  --accent: #00f0ff;
+  --accent2: #ff2bd6;
+  --text: #ffffff;
+  --danger: #ff5d6c;
 }
 
 * {
@@ -13,19 +19,251 @@ body {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: #05060f;
-  /* Disable iOS rubber-band / double-tap zoom while playing. */
+  background: var(--bg);
   overscroll-behavior: none;
   touch-action: none;
   -webkit-user-select: none;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  color: var(--text);
 }
 
 #game {
   display: block;
+  position: absolute;
+  inset: 0;
   width: 100vw;
   height: 100dvh;
   touch-action: none;
+}
+
+/* ---- menu overlays ---- */
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: max(24px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom));
+  background: radial-gradient(120% 120% at 50% 0%, rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0.78));
+  backdrop-filter: blur(8px);
+  z-index: 10;
+  animation: fade 0.2s ease;
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.card {
+  width: min(420px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  text-align: center;
+}
+
+.logo {
+  font-size: clamp(34px, 11vw, 56px);
+  font-weight: 900;
+  letter-spacing: 1px;
+  color: var(--accent);
+  text-shadow:
+    0 0 24px color-mix(in srgb, var(--accent) 70%, transparent),
+    2px 2px 0 color-mix(in srgb, var(--accent2) 35%, transparent);
+}
+
+.tagline {
+  margin-top: -6px;
+  opacity: 0.7;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  font-size: 13px;
+}
+
+.best {
+  opacity: 0.65;
+  font-weight: 700;
+  margin: 4px 0 8px;
+}
+
+h2 {
+  font-size: clamp(24px, 7vw, 32px);
+  font-weight: 900;
+  margin-bottom: 4px;
+}
+
+h2.over {
+  color: var(--danger);
+  text-shadow: 0 0 20px color-mix(in srgb, var(--danger) 60%, transparent);
+}
+
+h3 {
+  font-size: 16px;
+  font-weight: 800;
+  margin-top: 8px;
+  opacity: 0.9;
+}
+
+.body {
+  opacity: 0.8;
+  line-height: 1.6;
+  font-size: 15px;
+  text-align: left;
+}
+.body.small {
+  font-size: 13px;
+  opacity: 0.6;
+}
+
+.finalScore {
+  font-size: clamp(48px, 16vw, 72px);
+  font-weight: 900;
+  color: var(--text);
+  text-shadow: 0 0 24px color-mix(in srgb, var(--accent) 60%, transparent);
+  line-height: 1.1;
+}
+
+.record {
+  color: var(--accent2);
+  font-weight: 800;
+  font-size: 18px;
+}
+
+.statgrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin: 8px 0;
+}
+
+.stat {
+  background: var(--panel);
+  border-radius: 14px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.stat .v {
+  font-size: 22px;
+  font-weight: 900;
+}
+.stat .k {
+  font-size: 12px;
+  opacity: 0.6;
+  font-weight: 600;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 6px 0;
+}
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--panel);
+  border-radius: 14px;
+  padding: 12px 14px;
+  font-weight: 700;
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.btn {
+  border: none;
+  border-radius: 16px;
+  padding: 15px 18px;
+  font-size: 17px;
+  font-weight: 800;
+  font-family: inherit;
+  cursor: pointer;
+  color: #06121a;
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 60%, #000));
+  box-shadow: 0 6px 22px color-mix(in srgb, var(--accent) 35%, transparent);
+  transition:
+    transform 0.06s ease,
+    filter 0.15s ease;
+}
+.btn:active {
+  transform: scale(0.97);
+}
+.btn.secondary {
+  color: var(--text);
+  background: var(--panel);
+  box-shadow: none;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+.btn.ghost {
+  color: var(--text);
+  background: transparent;
+  box-shadow: none;
+  opacity: 0.7;
+}
+
+.toggle {
+  min-width: 64px;
+  border: none;
+  border-radius: 999px;
+  padding: 8px 16px;
+  font-weight: 800;
+  font-family: inherit;
+  cursor: pointer;
+  font-size: 14px;
+}
+.toggle.on {
+  background: var(--accent);
+  color: #06121a;
+}
+.toggle.off {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.seg {
+  display: flex;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 12px;
+  padding: 3px;
+}
+.segbtn {
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 13px;
+  padding: 7px 10px;
+  border-radius: 9px;
+  cursor: pointer;
+}
+.segbtn.active {
+  background: var(--accent);
+  color: #06121a;
 }
