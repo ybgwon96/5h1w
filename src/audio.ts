@@ -84,6 +84,17 @@ class AudioEngine {
   start(): void {
     this.tone(523, 0.12, "triangle", 0.22, 784);
   }
+
+  levelUp(): void {
+    // Quick ascending triad.
+    this.tone(523, 0.1, "triangle", 0.22, 659);
+    this.tone(659, 0.12, "triangle", 0.22, 784);
+    this.tone(784, 0.16, "triangle", 0.22, 1046);
+  }
+
+  ui(): void {
+    this.tone(600, 0.05, "sine", 0.12, 720);
+  }
 }
 
 export const audio = new AudioEngine();
